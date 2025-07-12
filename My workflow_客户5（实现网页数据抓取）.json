@@ -1,0 +1,460 @@
+{
+  "name": "My workflow 3 copy",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "databaseId": {
+          "__rl": true,
+          "value": "224440e4-d621-80e3-aeb6-c09d2d2711c3",
+          "mode": "list",
+          "cachedResultName": "五花解忧求职listingraw",
+          "cachedResultUrl": "https://www.notion.so/224440e4d62180e3aeb6c09d2d2711c3"
+        }
+      },
+      "id": "633c2c23-2958-4381-949f-19c7ee6add6f",
+      "name": "1. Notion Trigger",
+      "type": "n8n-nodes-base.notionTrigger",
+      "typeVersion": 1,
+      "position": [
+        -300,
+        20
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "6rkunJn8JPLC2e8j",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a master data extraction agent, acting as a \"parser\" for job descriptions. Your mission is to meticulously analyze the provided text and populate a structured template.\n\n**1. CORE INSTRUCTIONS:**\n- Your output **MUST** be only the structured data. Do not include any other text, notes, or apologies.\n- For each field, find the corresponding information in the text. Look for explicit headings (like \"Benefits,\" \"Location\") and implicit sections (like mapping \"What You'll Do\" to `responsibilities` or \"Who You Are\" to `qualifications`).\n- For long sections like `company_description`, provide a concise but informative summary.\n\n**2. OUTPUT FORMAT (MANDATORY):**\nYou must use this exact block format for every single field.\n\n<!-- PART_START --> field_name:\n- The content you extracted.\n<!-- PART_END -->\n\n**Formatting Rules:**\n- For multi-point sections (like responsibilities), each point MUST start on a new line with `- `.\n- If information for a field is genuinely not present in the text, you MUST use `- null`.\n\n---\n**HIGH-FIDELITY EXAMPLE (Study this carefully)**\n---\n**Example Input Text:**\n\"HealthGenix is hiring a Lead Product Designer to innovate in health tech. This is a remote role.\nWhat You Will Do:\n• Lead design sprints.\n• Create wireframes.\nWho We're Looking For:\n• 7+ years in product design.\n• A stunning portfolio.\nAbout Us:\nHealthGenix is a startup dedicated to making health data accessible. We are backed by top VCs.\nApply Here:\nPlease fill out the form on our careers page: healthgenix.com/careers\"\n\n**Example Correct Output:**\n<!-- PART_START --> job_title:\n- Lead Product Designer\n<!-- PART_END -->\n<!-- PART_START --> company_name:\n- HealthGenix\n<!-- PART_END -->\n<!-- PART_START --> job_type:\n- null\n<!-- PART_END -->\n<!-- PART_START --> location:\n- remote\n<!-- PART_END -->\n<!-- PART_START --> responsibilities:\n- Lead design sprints.\n- Create wireframes.\n<!-- PART_END -->\n<!-- PART_START --> qualifications:\n- 7+ years in product design.\n- A stunning portfolio.\n<!-- PART_END -->\n<!-- PART_START --> salary:\n- null\n<!-- PART_END -->\n<!-- PART_START --> application_deadline:\n- null\n<!-- PART_END -->\n<!-- PART_START --> benefits:\n- null\n<!-- PART_END -->\n<!-- PART_START --> company_description:\n- HealthGenix is a startup dedicated to making health data accessible and is backed by top VCs.\n<!-- PART_END -->\n<!-- PART_START --> application_steps:\n- Please fill out the form on our careers page: healthgenix.com/careers\n<!-- PART_END -->\n<!-- PART_START --> equal_opportunity:\n- null\n<!-- PART_END -->\n---\n\nNow, using the exact same logic and format as the high-fidelity example, process the real job description provided below.\n\n**JOB DESCRIPTION TO PROCESS:**\n{{ $json.job_content }}",
+        "options": {}
+      },
+      "id": "38718d94-92eb-4d5d-839e-c95c82ee3697",
+      "name": "2. Extract Info",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        60,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash",
+        "options": {}
+      },
+      "id": "b0f467b1-1972-4101-928a-7c7444999eed",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        80,
+        240
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "2MMbXKoWGiOYHu4c",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 最终返回的结果数组\nconst finalItems = [];\n\n// 预定义每个字段的中文标签\nconst fieldLabels = {\n  job_title: '岗位标题',\n  company_name: '公司名称',\n  job_type: '工作类型',\n  location: '工作地点',\n  responsibilities: '岗位职责',\n  qualifications: '任职要求',\n  salary: '薪资范围',\n  application_deadline: '申请截止日期',\n  benefits: '福利待遇',\n  company_description: '公司介绍',\n  application_steps: '申请步骤',\n  equal_opportunity: '平等机会声明'\n};\n\nfor (const item of items) {\n  try {\n    const rawStringOutput = item.json.output;\n    const jsonMatch = rawStringOutput.match(/```json\\s*([\\s\\S]*?)\\s*```/);\n    if (!jsonMatch || !jsonMatch[1]) {\n      throw new Error(\"未能从输入字符串中找到有效的JSON内容。\");\n    }\n    const cleanJsonString = jsonMatch[1];\n    const parsedJson = JSON.parse(cleanJsonString);\n\n    const structuredData = {};\n\n    for (const key in fieldLabels) {\n      if (Object.prototype.hasOwnProperty.call(parsedJson, key)) {\n        const value = parsedJson[key];\n        let content;\n\n        // 【核心逻辑】将所有类型的数据都转换为安全的字符串\n        if (value === null || value === undefined) {\n          // 1. 如果是 null 或 undefined，转换为空字符串 ''\n          content = '';\n        } else if (Array.isArray(value)) {\n          // 2. 如果是数组，转换为带 '*' 的 Markdown 列表字符串\n          //    并过滤掉数组中的空项\n          content = value\n            .filter(item => item && item.trim() !== '')\n            .map(item => `* ${item}`)\n            .join('\\n');\n        } else {\n          // 3. 如果是其他类型（如字符串、数字），直接转换为字符串\n          content = value.toString();\n        }\n        \n        structuredData[key] = {\n          label: fieldLabels[key],\n          content: content // content 现在永远是字符串\n        };\n      }\n    }\n\n    finalItems.push({\n      json: {\n        ...item.json,\n        structuredData: structuredData\n      }\n    });\n\n  } catch (error) {\n    console.error(`处理项目时出错: ${error.message}`);\n    // 出错时也返回一个安全的空结构\n    const emptyStructuredData = {};\n    for (const key in fieldLabels) {\n        emptyStructuredData[key] = { label: fieldLabels[key], content: '' };\n    }\n    finalItems.push({\n      json: {\n        error: `解析数据失败: ${error.message}`,\n        originalItem: item.json,\n        structuredData: emptyStructuredData\n      }\n    });\n  }\n}\n\nreturn finalItems;"
+      },
+      "id": "290043d1-117c-4dc1-adea-4b2642342b85",
+      "name": "3. Parse Extracted Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        740,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a professional English-to-Chinese translator specializing in job descriptions and business contexts. Your task is to translate the values of the provided JSON object into Simplified Chinese.\n\nInstructions:\n1.  **Translate only the string values** within the JSON. If a value is an array of strings, translate each string in the array.\n2.  Keep the original JSON structure and all field keys (e.g., `job_title`, `responsibilities`) exactly the same.\n3.  If a value is `null`, keep it as `null`.\n4.  Return **only a single, valid JSON object** as your response. Do not include any other text, explanations, or markdown formatting like ```json.\n\nTranslate this JSON object:\n\n{{ $json.output }}",
+        "options": {}
+      },
+      "id": "95e89bf5-576f-418a-b495-0f77d77d3e3e",
+      "name": "4. Translate to Chinese",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        400,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash",
+        "options": {}
+      },
+      "id": "78545d0a-e138-4b37-980c-468302521ccc",
+      "name": "Google Gemini Chat Model1",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        420,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "2MMbXKoWGiOYHu4c",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "1306665453@qq.com",
+        "toEmail": "mcafee13@126.com",
+        "subject": "notion处理结果",
+        "html": "={{ $json.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1140,
+        20
+      ],
+      "id": "c4569430-e81e-4c36-8e07-2cfe4fd64d9f",
+      "name": "Send email",
+      "webhookId": "b04ae84e-e52c-4fd5-8e02-9c0bfdf152db",
+      "credentials": {
+        "smtp": {
+          "id": "pteGsQq5RgGjaV1y",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": {
+          "__rl": true,
+          "value": "224440e4-d621-80bc-b96c-e44e98e02dc4",
+          "mode": "list",
+          "cachedResultName": "n8n_test",
+          "cachedResultUrl": "https://www.notion.so/224440e4d62180bcb96ce44e98e02dc4"
+        },
+        "title": "={{ $json.structuredData.job_title.content }}-解析结果- {{$now.toFormat('yyyy年M月d日 H:mm')}}",
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "heading_2",
+              "textContent": "={{ $json.structuredData.job_title.label }}"
+            },
+            {
+              "textContent": "={{ $json.structuredData.job_title.content }}"
+            },
+            {
+              "type": "heading_2",
+              "textContent": "={{ $json.structuredData.company_name.label }}"
+            },
+            {
+              "textContent": "={{ $json.structuredData.company_name.content }}"
+            },
+            {
+              "type": "heading_2",
+              "textContent": "={{ $json.structuredData.location.label }}"
+            },
+            {
+              "textContent": "={{ $json.structuredData.location.content }}"
+            },
+            {
+              "type": "heading_2",
+              "textContent": "={{ $json.structuredData.responsibilities.label }}"
+            },
+            {
+              "textContent": "={{ $json.structuredData.responsibilities.content }}"
+            },
+            {
+              "type": "heading_2",
+              "textContent": "={{ $json.structuredData.qualifications.label }}"
+            },
+            {
+              "textContent": "={{ $json.structuredData.qualifications.content }}"
+            },
+            {
+              "type": "heading_2",
+              "textContent": "={{ $json.structuredData.salary.label }}"
+            },
+            {
+              "textContent": "={{ $json.structuredData.salary.content }}"
+            },
+            {
+              "type": "heading_2",
+              "textContent": "={{ $json.structuredData.application_deadline.label }}"
+            },
+            {
+              "textContent": "={{ $json.structuredData.application_deadline.content }}"
+            },
+            {
+              "type": "heading_2",
+              "textContent": "={{ $json.structuredData.benefits.label }}"
+            },
+            {
+              "textContent": "={{ $json.structuredData.benefits.content }}"
+            },
+            {
+              "type": "heading_2",
+              "textContent": "={{ $json.structuredData.company_description.label }}"
+            },
+            {
+              "textContent": "={{ $json.structuredData.company_description.content }}"
+            },
+            {
+              "type": "heading_2",
+              "textContent": "={{ $json.structuredData.equal_opportunity.label }}"
+            },
+            {
+              "textContent": "={{ $json.structuredData.equal_opportunity.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        920,
+        20
+      ],
+      "id": "da369a70-267f-4fc5-a043-42d7d2ef61a0",
+      "name": "Create a database page",
+      "credentials": {
+        "notionApi": {
+          "id": "6rkunJn8JPLC2e8j",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.zenrows.com/v1/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.link }}"
+            },
+            {
+              "name": "js_render",
+              "value": "true"
+            },
+            {
+              "name": "premium_proxy",
+              "value": "true"
+            },
+            {
+              "name": "API Key",
+              "value": "d5c7e7fe405b85bfb8a50b4dca4993687a3befbc"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -220,
+        380
+      ],
+      "id": "cc1a1bf6-fa92-4768-af69-d856bfa3ed19",
+      "name": "ScrapingBee Scraper",
+      "credentials": {
+        "actionNetworkApi": {
+          "id": "8k5n0iBtDS8Pt4Ju",
+          "name": "Action Network account"
+        },
+        "airtableTokenApi": {
+          "id": "jVhIJfLQevXeWxrC",
+          "name": "Airtable Personal Access Token account"
+        },
+        "httpBearerAuth": {
+          "id": "Hdcrp8yBxc9I3Mo2",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.zenrows.com/v1/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "d5c7e7fe405b85bfb8a50b4dca4993687a3befbc"
+            },
+            {
+              "name": "url",
+              "value": "={{ encodeURIComponent($json.properties.link.url) }}"
+            },
+            {
+              "name": "js_render",
+              "value": "true"
+            },
+            {
+              "name": "css_extractor",
+              "value": "={\"job_content\": \"div[class*='styles_jobDescription'], [data-ashby-jc-key='description']\"}"
+            },
+            {
+              "name": "autoparse",
+              "value": "true"
+            },
+            {
+              "name": "premium_proxy",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -100,
+        20
+      ],
+      "id": "d03a8dda-e3b0-435f-b334-c2eac26ce506",
+      "name": "ZenRows Scraper"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "1. Notion Trigger": {
+      "main": [
+        [
+          {
+            "node": "ZenRows Scraper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Extract Info": {
+      "main": [
+        [
+          {
+            "node": "4. Translate to Chinese",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "2. Extract Info",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Parse Extracted Data": {
+      "main": [
+        [
+          {
+            "node": "Create a database page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Translate to Chinese": {
+      "main": [
+        [
+          {
+            "node": "3. Parse Extracted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "4. Translate to Chinese",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a database page": {
+      "main": [
+        [
+          {
+            "node": "Send email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ScrapingBee Scraper": {
+      "main": [
+        []
+      ]
+    },
+    "ZenRows Scraper": {
+      "main": [
+        [
+          {
+            "node": "2. Extract Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "8bfeec57-95e6-4f19-a71a-d57ebc488c18",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4a7eaafaea79e1346da06df4a7279b4f817d34f7997bcac9a00601ec17871bb9"
+  },
+  "id": "xRp5K443SnsFG2Al",
+  "tags": []
+}
